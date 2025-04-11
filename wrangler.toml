@@ -1,0 +1,13 @@
+name = "meal-planning-api"
+main = "worker.js"
+compatibility_date = "2024-04-11"
+
+# D1 Database binding
+[[d1_databases]]
+binding = "DB"
+database_name = "meal_planning_db"
+database_id = "placeholder-id-replace-this" # Replace with actual ID once created
+
+# Allow HTTP POST requests
+[triggers]
+crons = [] 
