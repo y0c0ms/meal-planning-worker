@@ -1,3 +1,7 @@
+// Rate limiting for debug endpoint
+const DEBUG_REQUESTS = new Map();
+const DEBUG_RATE_LIMIT = 5000; // ms between requests from the same IP
+
 // Cloudflare Worker script for meal planning app API (ES module format)
 
 export default {
@@ -24,11 +28,30 @@ async function handleRequest(request, env) {
   }
 
   // Get the URL and path
-  const url = new URL(request.url);
-  const path = url.pathname;
-
-  // Add debug endpoint to check API status
   if (path === '/api/debug' || path === '/debug') {
+    // Rate limiting for debug endpoint
+    const clientIP = request.headers.get('CF-Connecting-IP') || 'unknown';
+    const now = Date.now();
+    const lastRequest = DEBUG_REQUESTS.get(clientIP) || 0;
+    
+    // If the same IP made a request less than 5 seconds ago, return 429 Too Many Requests
+    if (now - lastRequest < DEBUG_RATE_LIMIT) {
+      return new Response(JSON.stringify({
+        error: 'Too many requests',
+        retry_after: Math.ceil((lastRequest + DEBUG_RATE_LIMIT - now) / 1000)
+      }), {
+        status: 429,
+        headers: {
+          ...corsHeaders,
+          'Content-Type': 'application/json',
+          'Retry-After': Math.ceil((lastRequest + DEBUG_RATE_LIMIT - now) / 1000)
+        }
+      });
+    }
+    
+    // Update the last request time for this IP
+    DEBUG_REQUESTS.set(clientIP, now);
+    
     return new Response(JSON.stringify({
       status: 'online',
       timestamp: new Date().toISOString(),
@@ -39,6 +62,13 @@ async function handleRequest(request, env) {
         preflight_supported: true,
         origin: request.headers.get('Origin') || 'Not specified'
       }
+    }), {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'application/json'
+      }
+    });
+  }
     }), {
       headers: {
         ...corsHeaders,
