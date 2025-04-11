@@ -1,0 +1,7 @@
+name = "meal-planning-api"
+main = "worker.js"
+compatibility_date = "2024-04-11"
+
+# Allow HTTP POST requests
+[triggers]
+crons = [] 
