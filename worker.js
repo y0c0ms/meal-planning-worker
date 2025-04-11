@@ -169,15 +169,23 @@ async function handleMeals(request, env, headers, path) {
           `SELECT * FROM meals LIMIT 50`
         ).all();
         
-        return new Response(JSON.stringify({data: results}), { headers });
+        return new Response(JSON.stringify({data: results || []}), { headers });
       } catch (error) {
         // Table doesn't exist, return empty data instead of error
         if (error.message && error.message.includes('no such table')) {
           console.error("Table meals does not exist, returning empty data");
           return new Response(JSON.stringify({ data: [] }), { headers });
         }
-        // For other errors, re-throw
-        throw error;
+        // For other errors, still return a valid data structure
+        console.error("Error fetching meals:", error);
+        return new Response(JSON.stringify({ 
+          data: [], 
+          error: 'Database error fetching meals',
+          details: error.message
+        }), { 
+          status: 500,
+          headers 
+        });
       }
     }
     
