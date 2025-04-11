@@ -160,80 +160,137 @@ async function handleMeals(request, env, headers, path) {
   // Remove /api prefix if present for consistent handling
   const normalizedPath = path.replace(/^\/api/, '');
   
-  // GET meals list
-  if ((normalizedPath === '/meals' || normalizedPath === '/meals/') && request.method === 'GET') {
-    // Example query to D1 database
-    const { results } = await env.DB.prepare(
-      `SELECT * FROM meals LIMIT 50`
-    ).all();
-    
-    return new Response(JSON.stringify({data: results}), { headers });
-  }
-  
-  // GET single meal
-  if (normalizedPath.match(/^\/meals\/\d+$/) && request.method === 'GET') {
-    const id = normalizedPath.split('/')[2];
-    const stmt = env.DB.prepare(`SELECT * FROM meals WHERE id = ?`);
-    const meal = await stmt.bind(id).first();
-    
-    if (!meal) {
-      return new Response(JSON.stringify({ error: 'Meal not found', meal_id: id }), {
-        status: 404,
-        headers
-      });
+  try {
+    // GET meals list
+    if ((normalizedPath === '/meals' || normalizedPath === '/meals/') && request.method === 'GET') {
+      try {
+        // Example query to D1 database
+        const { results } = await env.DB.prepare(
+          `SELECT * FROM meals LIMIT 50`
+        ).all();
+        
+        return new Response(JSON.stringify({data: results}), { headers });
+      } catch (error) {
+        // Table doesn't exist, return empty data instead of error
+        if (error.message && error.message.includes('no such table')) {
+          console.error("Table meals does not exist, returning empty data");
+          return new Response(JSON.stringify({ data: [] }), { headers });
+        }
+        // For other errors, re-throw
+        throw error;
+      }
     }
     
-    return new Response(JSON.stringify(meal), { headers });
-  }
-  
-  // POST new meal
-  if ((normalizedPath === '/meals' || normalizedPath === '/meals/') && request.method === 'POST') {
-    const data = await request.json();
-    
-    // Insert new meal
-    const { success, meta } = await env.DB.prepare(
-      `INSERT INTO meals (name, description, ingredients, is_custom, rating) 
-       VALUES (?, ?, ?, ?, ?)`
-    )
-    .bind(
-      data.name,
-      data.description || '',
-      JSON.stringify(data.ingredients || []),
-      data.is_custom || false,
-      data.rating || null
-    )
-    .run();
-    
-    if (success) {
-      return new Response(JSON.stringify({ 
-        message: 'Meal created successfully',
-        data: { id: meta.last_row_id, ...data }
-      }), {
-        status: 201,
-        headers
-      });
-    } else {
-      return new Response(JSON.stringify({ error: 'Failed to create meal' }), {
-        status: 500,
-        headers
-      });
+    // GET single meal
+    if (normalizedPath.match(/^\/meals\/\d+$/) && request.method === 'GET') {
+      const id = normalizedPath.split('/')[2];
+      
+      try {
+        const stmt = env.DB.prepare(`SELECT * FROM meals WHERE id = ?`);
+        const meal = await stmt.bind(id).first();
+        
+        if (!meal) {
+          return new Response(JSON.stringify({ error: 'Meal not found', meal_id: id }), {
+            status: 404,
+            headers
+          });
+        }
+        
+        return new Response(JSON.stringify(meal), { headers });
+      } catch (error) {
+        // Table doesn't exist
+        if (error.message && error.message.includes('no such table')) {
+          return new Response(JSON.stringify({ error: 'Meal not found', meal_id: id }), {
+            status: 404,
+            headers
+          });
+        }
+        // For other errors, re-throw
+        throw error;
+      }
     }
-  }
-  
-  // Default response for unhandled meal requests
-  return new Response(JSON.stringify({ 
-    error: 'Method not allowed',
-    path: path,
-    normalized_path: normalizedPath,
-    method: request.method,
-    allowed_methods: ['GET', 'POST'],
-  }), {
-    status: 405,
-    headers: {
-      ...headers,
-      'Allow': 'GET, POST'
+    
+    // POST new meal
+    if ((normalizedPath === '/meals' || normalizedPath === '/meals/') && request.method === 'POST') {
+      const data = await request.json();
+      
+      try {
+        // Try to create the table if it doesn't exist
+        await env.DB.prepare(
+          `CREATE TABLE IF NOT EXISTS meals (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            description TEXT,
+            ingredients TEXT,
+            is_custom BOOLEAN DEFAULT FALSE,
+            rating INTEGER
+          )`
+        ).run();
+        
+        // Insert new meal
+        const { success, meta } = await env.DB.prepare(
+          `INSERT INTO meals (name, description, ingredients, is_custom, rating) 
+           VALUES (?, ?, ?, ?, ?)`
+        )
+        .bind(
+          data.name,
+          data.description || '',
+          JSON.stringify(data.ingredients || []),
+          data.is_custom || false,
+          data.rating || null
+        )
+        .run();
+        
+        if (success) {
+          return new Response(JSON.stringify({ 
+            message: 'Meal created successfully',
+            data: { id: meta.last_row_id, ...data }
+          }), {
+            status: 201,
+            headers
+          });
+        } else {
+          return new Response(JSON.stringify({ error: 'Failed to create meal' }), {
+            status: 500,
+            headers
+          });
+        }
+      } catch (error) {
+        return new Response(JSON.stringify({ 
+          error: 'Database error creating meal', 
+          details: error.message 
+        }), {
+          status: 500,
+          headers
+        });
+      }
     }
-  });
+    
+    // Default response for unhandled meal requests
+    return new Response(JSON.stringify({ 
+      error: 'Method not allowed',
+      path: path,
+      normalized_path: normalizedPath,
+      method: request.method,
+      allowed_methods: ['GET', 'POST'],
+    }), {
+      status: 405,
+      headers: {
+        ...headers,
+        'Allow': 'GET, POST'
+      }
+    });
+  } catch (error) {
+    // Handle any unexpected errors
+    return new Response(JSON.stringify({ 
+      error: 'Internal server error processing meals request',
+      details: error.message,
+      stack: error.stack 
+    }), {
+      status: 500,
+      headers
+    });
+  }
 }
 
 // Handle shopping list requests
@@ -243,63 +300,116 @@ async function handleShoppingList(request, env, headers, path) {
   // Remove /api prefix if present for consistent handling
   const normalizedPath = path.replace(/^\/api/, '');
   
-  // GET shopping list items
-  if ((normalizedPath === '/shopping-list' || normalizedPath === '/shopping-list/') && request.method === 'GET') {
-    const { results } = await env.DB.prepare(
-      `SELECT * FROM shopping_list_items ORDER BY day, meal_type`
-    ).all();
-    
-    return new Response(JSON.stringify({data: results}), { headers });
-  }
-  
-  // POST new shopping list item
-  if ((normalizedPath === '/shopping-list' || normalizedPath === '/shopping-list/') && request.method === 'POST') {
-    const data = await request.json();
-    
-    const { success, meta } = await env.DB.prepare(
-      `INSERT INTO shopping_list_items (name, quantity, unit, day, meal_type, purchased) 
-       VALUES (?, ?, ?, ?, ?, ?)`
-    )
-    .bind(
-      data.name,
-      data.quantity || '',
-      data.unit || '',
-      data.day || null,
-      data.meal_type || null,
-      data.purchased || false
-    )
-    .run();
-    
-    if (success) {
-      return new Response(JSON.stringify({ 
-        message: 'Item added successfully',
-        data: { id: meta.last_row_id, ...data }
-      }), {
-        status: 201,
-        headers
-      });
-    } else {
-      return new Response(JSON.stringify({ error: 'Failed to add item' }), {
-        status: 500,
-        headers
-      });
+  try {
+    // GET shopping list items
+    if ((normalizedPath === '/shopping-list' || normalizedPath === '/shopping-list/') && request.method === 'GET') {
+      try {
+        const { results } = await env.DB.prepare(
+          `SELECT * FROM shopping_list_items ORDER BY day, meal_type`
+        ).all();
+        
+        return new Response(JSON.stringify({data: results || []}), { headers });
+      } catch (error) {
+        // Table doesn't exist, return empty data instead of error
+        if (error.message && error.message.includes('no such table')) {
+          console.error("Table shopping_list_items does not exist, returning empty data");
+          return new Response(JSON.stringify({ data: [] }), { headers });
+        }
+        // For other errors, still return a valid data structure
+        console.error("Error fetching shopping list:", error);
+        return new Response(JSON.stringify({ 
+          data: [], 
+          error: 'Database error fetching shopping list',
+          details: error.message
+        }), { 
+          status: 500,
+          headers 
+        });
+      }
     }
-  }
-  
-  // Default response for unhandled shopping list requests
-  return new Response(JSON.stringify({ 
-    error: 'Method not allowed',
-    path: path,
-    normalized_path: normalizedPath,
-    method: request.method,
-    allowed_methods: ['GET', 'POST'],
-  }), {
-    status: 405,
-    headers: {
-      ...headers,
-      'Allow': 'GET, POST'
+    
+    // POST new shopping list item
+    if ((normalizedPath === '/shopping-list' || normalizedPath === '/shopping-list/') && request.method === 'POST') {
+      const data = await request.json();
+      
+      try {
+        // Try to create the table if it doesn't exist
+        await env.DB.prepare(
+          `CREATE TABLE IF NOT EXISTS shopping_list_items (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            quantity TEXT,
+            unit TEXT,
+            day TEXT,
+            meal_type TEXT,
+            purchased BOOLEAN DEFAULT FALSE
+          )`
+        ).run();
+        
+        const { success, meta } = await env.DB.prepare(
+          `INSERT INTO shopping_list_items (name, quantity, unit, day, meal_type, purchased) 
+           VALUES (?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          data.name,
+          data.quantity || '',
+          data.unit || '',
+          data.day || null,
+          data.meal_type || null,
+          data.purchased || false
+        )
+        .run();
+        
+        if (success) {
+          return new Response(JSON.stringify({ 
+            message: 'Item added successfully',
+            data: { id: meta.last_row_id, ...data }
+          }), {
+            status: 201,
+            headers
+          });
+        } else {
+          return new Response(JSON.stringify({ error: 'Failed to add item' }), {
+            status: 500,
+            headers
+          });
+        }
+      } catch (error) {
+        return new Response(JSON.stringify({ 
+          error: 'Database error creating shopping list item', 
+          details: error.message 
+        }), {
+          status: 500,
+          headers
+        });
+      }
     }
-  });
+    
+    // Default response for unhandled shopping list requests
+    return new Response(JSON.stringify({ 
+      error: 'Method not allowed',
+      path: path,
+      normalized_path: normalizedPath,
+      method: request.method,
+      allowed_methods: ['GET', 'POST'],
+    }), {
+      status: 405,
+      headers: {
+        ...headers,
+        'Allow': 'GET, POST'
+      }
+    });
+  } catch (error) {
+    // Handle any unexpected errors
+    return new Response(JSON.stringify({ 
+      error: 'Internal server error processing shopping list request',
+      details: error.message,
+      stack: error.stack 
+    }), {
+      status: 500,
+      headers
+    });
+  }
 }
 
 // Handle meal plan requests
@@ -309,92 +419,165 @@ async function handleMealPlans(request, env, headers, path) {
   // Remove /api prefix if present for consistent handling
   const normalizedPath = path.replace(/^\/api/, '');
   
-  // GET meal plans
-  if ((normalizedPath === '/mealplans' || normalizedPath === '/mealplans/') && request.method === 'GET') {
-    const { results } = await env.DB.prepare(
-      `SELECT * FROM meal_plans`
-    ).all();
-    
-    return new Response(JSON.stringify({ data: results }), { headers });
-  }
-  
-  // POST new meal plan
-  if ((normalizedPath === '/mealplans' || normalizedPath === '/mealplans/') && request.method === 'POST') {
-    const data = await request.json();
-    
-    const { success, meta } = await env.DB.prepare(
-      `INSERT INTO meal_plans (day, breakfast, lunch, dinner) 
-       VALUES (?, ?, ?, ?)`
-    )
-    .bind(
-      data.day,
-      data.breakfast || null,
-      data.lunch || null,
-      data.dinner || null
-    )
-    .run();
-    
-    if (success) {
-      return new Response(JSON.stringify({ 
-        message: 'Meal plan created successfully',
-        data: { id: meta.last_row_id, ...data }
-      }), {
-        status: 201,
-        headers
-      });
-    } else {
-      return new Response(JSON.stringify({ error: 'Failed to create meal plan' }), {
-        status: 500,
-        headers
-      });
+  try {
+    // GET meal plans
+    if ((normalizedPath === '/mealplans' || normalizedPath === '/mealplans/') && request.method === 'GET') {
+      // First check if table exists
+      try {
+        const { results } = await env.DB.prepare(
+          `SELECT * FROM meal_plans`
+        ).all();
+        
+        return new Response(JSON.stringify({ data: results || [] }), { headers });
+      } catch (error) {
+        // Table doesn't exist, return empty data instead of error
+        if (error.message && error.message.includes('no such table')) {
+          console.error("Table meal_plans does not exist, returning empty data");
+          return new Response(JSON.stringify({ data: [] }), { headers });
+        }
+        // For other errors, still return a valid data structure
+        console.error("Error fetching meal plans:", error);
+        return new Response(JSON.stringify({ 
+          data: [], 
+          error: 'Database error fetching meal plans',
+          details: error.message
+        }), { 
+          status: 500,
+          headers 
+        });
+      }
     }
-  }
+    
+    // POST new meal plan
+    if ((normalizedPath === '/mealplans' || normalizedPath === '/mealplans/') && request.method === 'POST') {
+      const data = await request.json();
+      
+      try {
+        // Try to create the table if it doesn't exist
+        await env.DB.prepare(
+          `CREATE TABLE IF NOT EXISTS meal_plans (
+            id INTEGER PRIMARY KEY,
+            day TEXT,
+            breakfast INTEGER,
+            lunch INTEGER,
+            dinner INTEGER
+          )`
+        ).run();
+        
+        const { success, meta } = await env.DB.prepare(
+          `INSERT INTO meal_plans (day, breakfast, lunch, dinner) 
+           VALUES (?, ?, ?, ?)`
+        )
+        .bind(
+          data.day,
+          data.breakfast || null,
+          data.lunch || null,
+          data.dinner || null
+        )
+        .run();
+        
+        if (success) {
+          return new Response(JSON.stringify({ 
+            message: 'Meal plan created successfully',
+            data: { id: meta.last_row_id, ...data }
+          }), {
+            status: 201,
+            headers
+          });
+        } else {
+          return new Response(JSON.stringify({ error: 'Failed to create meal plan' }), {
+            status: 500,
+            headers
+          });
+        }
+      } catch (error) {
+        return new Response(JSON.stringify({ 
+          error: 'Database error creating meal plan', 
+          details: error.message 
+        }), {
+          status: 500,
+          headers
+        });
+      }
+    }
 
-  // PUT/UPDATE meal plan
-  if (normalizedPath.match(/^\/mealplans\/\d+\/$/) && request.method === 'PUT') {
-    const id = normalizedPath.split('/')[2];
-    const data = await request.json();
-    
-    const { success } = await env.DB.prepare(
-      `UPDATE meal_plans SET 
-       breakfast = ?, lunch = ?, dinner = ?
-       WHERE id = ?`
-    )
-    .bind(
-      data.breakfast || null,
-      data.lunch || null,
-      data.dinner || null,
-      id
-    )
-    .run();
-    
-    if (success) {
-      return new Response(JSON.stringify({ 
-        message: 'Meal plan updated successfully',
-        data: { id: parseInt(id), ...data }
-      }), { headers });
-    } else {
-      return new Response(JSON.stringify({ error: 'Failed to update meal plan' }), {
-        status: 500,
-        headers
-      });
+    // PUT/UPDATE meal plan
+    if (normalizedPath.match(/^\/mealplans\/\d+$/) && request.method === 'PUT') {
+      const id = normalizedPath.split('/')[2];
+      const data = await request.json();
+      
+      try {
+        // Try to create the table if it doesn't exist
+        await env.DB.prepare(
+          `CREATE TABLE IF NOT EXISTS meal_plans (
+            id INTEGER PRIMARY KEY,
+            day TEXT,
+            breakfast INTEGER,
+            lunch INTEGER,
+            dinner INTEGER
+          )`
+        ).run();
+        
+        const { success } = await env.DB.prepare(
+          `UPDATE meal_plans SET 
+           breakfast = ?, lunch = ?, dinner = ?
+           WHERE id = ?`
+        )
+        .bind(
+          data.breakfast || null,
+          data.lunch || null,
+          data.dinner || null,
+          id
+        )
+        .run();
+        
+        if (success) {
+          return new Response(JSON.stringify({ 
+            message: 'Meal plan updated successfully',
+            data: { id: parseInt(id), ...data }
+          }), { headers });
+        } else {
+          return new Response(JSON.stringify({ error: 'Failed to update meal plan' }), {
+            status: 500,
+            headers
+          });
+        }
+      } catch (error) {
+        return new Response(JSON.stringify({ 
+          error: 'Database error updating meal plan', 
+          details: error.message 
+        }), {
+          status: 500,
+          headers
+        });
+      }
     }
+    
+    // Default response for unhandled meal plan requests
+    return new Response(JSON.stringify({ 
+      error: 'Method not allowed',
+      path: path,
+      normalized_path: normalizedPath,
+      method: request.method,
+      allowed_methods: ['GET', 'POST', 'PUT'],
+    }), {
+      status: 405,
+      headers: {
+        ...headers,
+        'Allow': 'GET, POST, PUT'
+      }
+    });
+  } catch (error) {
+    // Handle any unexpected errors
+    return new Response(JSON.stringify({ 
+      error: 'Internal server error processing meal plans request',
+      details: error.message,
+      stack: error.stack 
+    }), {
+      status: 500,
+      headers
+    });
   }
-  
-  // Default response for unhandled meal plan requests
-  return new Response(JSON.stringify({ 
-    error: 'Method not allowed',
-    path: path,
-    normalized_path: normalizedPath,
-    method: request.method,
-    allowed_methods: ['GET', 'POST', 'PUT'],
-  }), {
-    status: 405,
-    headers: {
-      ...headers,
-      'Allow': 'GET, POST, PUT'
-    }
-  });
 }
 
 // Handle shared lists requests
