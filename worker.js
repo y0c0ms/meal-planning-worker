@@ -26,6 +26,9 @@ async function handleRequest(request, env) {
       headers: corsHeaders
     });
   }
+  const url = new URL(request.url);\n  const path = url.pathname;
+  const url = new URL(request.url);
+  const path = url.pathname;
 
   // Get the URL and path
   if (path === '/api/debug' || path === '/debug') {
