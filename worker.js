@@ -26,11 +26,10 @@ async function handleRequest(request, env) {
       headers: corsHeaders
     });
   }
-  const url = new URL(request.url);\n  const path = url.pathname;
+  // Get the URL and path
   const url = new URL(request.url);
   const path = url.pathname;
 
-  // Get the URL and path
   if (path === '/api/debug' || path === '/debug') {
     // Rate limiting for debug endpoint
     const clientIP = request.headers.get('CF-Connecting-IP') || 'unknown';
