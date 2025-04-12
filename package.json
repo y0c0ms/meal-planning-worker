@@ -4,13 +4,12 @@
     "description": "Meal Planning App API with Cloudflare Workers",
     "main": "worker.js",
     "scripts": {
-      "dev": "wrangler dev",
-      "deploy": "wrangler deploy",
-      "create-db": "wrangler d1 create meal_planning_db",
-      "apply-schema": "wrangler d1 execute meal_planning_db --file=./schema.sql"
+        "dev": "wrangler dev",
+        "deploy": "wrangler deploy",
+        "create-db": "wrangler d1 create meal_planning_db",
+        "apply-schema": "wrangler d1 execute meal_planning_db --file=./schema.sql"
     },
-    "dependencies": {},
     "devDependencies": {
-      "wrangler": "^3.0.0"
+        "wrangler": "^4.10.0"
     }
-  }
+}
