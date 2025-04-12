@@ -700,11 +700,9 @@ async function handleIngredients(request, env, headers, path) {
 
 // Handle simple shared list requests
 async function handleSimpleSharedList(request, env, headers, path) {
-  const url = new URL(request.url);
-  
-  // Remove /api prefix if present for consistent handling
-  const normalizedPath = path.replace(/^\/api/, '');
-  
+  const normalizedPath = path;
+
+  try {
   // GET simple shared list
   if ((normalizedPath === '/simple-shared-list' || normalizedPath === '/simple-shared-list/') && request.method === 'GET') {
     const { results } = await env.DB.prepare(
